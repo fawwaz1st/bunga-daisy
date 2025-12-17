@@ -97,9 +97,9 @@ export class AudioLayer {
             this.compressor.attack.value = 0.01;
             this.compressor.release.value = 0.2;
 
-            // Master gain - mobile gets 5x boost to compensate for lower browser output
+            // Master gain - mobile gets 10x boost to compensate for lower browser output
             this.masterGain = this.ctx.createGain();
-            const mobileBoost = this.capabilities.isMobile ? 5.0 : 1.0;
+            const mobileBoost = this.capabilities.isMobile ? 10.0 : 1.0;
             this.masterGain.gain.value = AUDIO.masterVolume * mobileBoost;
 
             // Create reverb (shorter for mobile)

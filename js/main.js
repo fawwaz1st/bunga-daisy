@@ -45,6 +45,11 @@ class DaisyExperience {
         this.isRunning = false;
         this.audioPromptVisible = true;
 
+        // FPS limiting for mobile
+        this.frameInterval = 1000 / (this.capabilities.isMobile ? 30 : 60);
+        this.lastFrameTime = 0;
+        this.frameCount = 0;
+
         // Bind methods
         this.animate = this.animate.bind(this);
         this.resize = this.resize.bind(this);
@@ -240,7 +245,11 @@ class DaisyExperience {
     }
 
     resize() {
-        const dpr = this.capabilities.pixelRatio;
+        // Limit pixel ratio on mobile for performance
+        let dpr = this.capabilities.pixelRatio;
+        if (this.capabilities.isMobile) {
+            dpr = Math.min(dpr, 1.5);
+        }
 
         this.width = window.innerWidth;
         this.height = window.innerHeight;
@@ -272,12 +281,23 @@ class DaisyExperience {
     animate(currentTime) {
         if (!this.isRunning) return;
 
-        const deltaTime = Math.min(32, currentTime - this.lastTime);
+        // FPS limiting for mobile
+        const elapsed = currentTime - this.lastFrameTime;
+
+        if (elapsed < this.frameInterval) {
+            requestAnimationFrame(this.animate);
+            return;
+        }
+
+        this.lastFrameTime = currentTime - (elapsed % this.frameInterval);
+
+        const deltaTime = Math.min(50, currentTime - this.lastTime);
         this.lastTime = currentTime;
 
         this.update(deltaTime);
         this.drawFrame(deltaTime);
 
+        this.frameCount++;
         requestAnimationFrame(this.animate);
     }
 

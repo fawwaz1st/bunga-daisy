@@ -1,4 +1,4 @@
-# 🌼 Bunga Daisy — Interaktif
+# 🌼 Bunga Daisy
 
 <p align="center">
   <img src="img/image.png" alt="Bunga Daisy Preview" width="700">

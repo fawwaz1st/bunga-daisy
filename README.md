@@ -1,5 +1,9 @@
 # 🌼 Bunga Daisy — Interaktif
 
+<p align="center">
+  <img src="img/image.png" alt="Bunga Daisy Preview" width="700">
+</p>
+
 > **Pengalaman web yang tenang dan sinematik menampilkan bunga daisy tunggal**
 > dengan musik generatif, latar paralaks dinamis, dan interaksi responsif
 

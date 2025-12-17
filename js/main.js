@@ -101,9 +101,15 @@ class DaisyExperience {
     setupAudioPrompt() {
         const prompt = document.getElementById('audio-prompt');
 
-        const start = async () => {
+        const start = async (e) => {
+            // Prevent default to avoid double-firing on mobile
+            if (e) e.preventDefault();
+
+            console.log('Starting audio...');
+
             // Initialize and start audio
-            await this.audio.init();
+            const success = await this.audio.init();
+            console.log('Audio init result:', success);
 
             // Hide prompt
             prompt.classList.add('hidden');
@@ -112,13 +118,16 @@ class DaisyExperience {
             // Start the experience
             this.startExperience();
 
-            // Remove listener
+            // Remove all listeners
             prompt.removeEventListener('click', start);
+            prompt.removeEventListener('touchstart', start);
             prompt.removeEventListener('touchend', start);
         };
 
+        // Use touchstart for iOS (more reliable for audio unlock)
+        prompt.addEventListener('touchstart', start, { passive: false });
+        prompt.addEventListener('touchend', start, { passive: false });
         prompt.addEventListener('click', start);
-        prompt.addEventListener('touchend', start);
     }
 
     handleUserGesture() {

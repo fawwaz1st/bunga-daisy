@@ -73,28 +73,33 @@ export class AudioLayer {
             // Detect device capabilities
             this.capabilities = getDeviceCapabilities();
 
-            // Create audio context with mobile-friendly settings
+            // Create audio context
             const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+            this.ctx = new AudioContextClass();
 
-            // Mobile: use lower sample rate if possible
-            const options = this.capabilities.isMobile ? { sampleRate: 44100 } : {};
-            this.ctx = new AudioContextClass(options);
-
+            // iOS/Safari requires resume after user gesture
             if (this.ctx.state === 'suspended') {
                 await this.ctx.resume();
             }
 
-            // Dynamics compressor (lighter for mobile)
-            this.compressor = this.ctx.createDynamicsCompressor();
-            this.compressor.threshold.value = this.capabilities.isMobile ? -15 : -20;
-            this.compressor.knee.value = 30;
-            this.compressor.ratio.value = this.capabilities.isMobile ? 6 : 8;
-            this.compressor.attack.value = 0.01;
-            this.compressor.release.value = 0.25;
+            // Double-check resume worked (iOS sometimes needs multiple attempts)
+            if (this.ctx.state !== 'running') {
+                console.log('AudioContext not running, state:', this.ctx.state);
+                // Try resume again
+                await this.ctx.resume();
+            }
 
-            // Master gain (lower for mobile to prevent clipping)
+            // Dynamics compressor
+            this.compressor = this.ctx.createDynamicsCompressor();
+            this.compressor.threshold.value = -18;
+            this.compressor.knee.value = 25;
+            this.compressor.ratio.value = 6;
+            this.compressor.attack.value = 0.01;
+            this.compressor.release.value = 0.2;
+
+            // Master gain - LOUDER for mobile
             this.masterGain = this.ctx.createGain();
-            this.masterGain.gain.value = AUDIO.masterVolume * (this.capabilities.isMobile ? 0.5 : 0.75);
+            this.masterGain.gain.value = AUDIO.masterVolume * 0.85;
 
             // Create reverb (shorter for mobile)
             this.reverbNode = await this.createReverb();
@@ -104,6 +109,7 @@ export class AudioLayer {
             this.masterGain.connect(this.ctx.destination);
 
             this.isInitialized = true;
+            console.log('Audio initialized, state:', this.ctx.state);
             return true;
         } catch (e) {
             console.warn('Audio initialization failed:', e);

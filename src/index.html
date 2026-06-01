@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="An immersive interactive daisy flower experience with generative music, cinematic animations, and responsive interactivity.">
+  <meta name="theme-color" content="#f5f0e6">
+  <meta name="referrer" content="strict-origin-when-cross-origin">
+
+  <!-- Open Graph -->
+  <meta property="og:title" content="Daisy — Interactive Experience">
+  <meta property="og:description" content="An immersive interactive daisy flower experience with generative music and cinematic animations.">
+  <meta property="og:type" content="website">
+  <meta property="og:image" content="/img/og-image.png">
+  <meta property="og:url" content="https://fawwaz1st.github.io/bunga-daisy/">
+
+  <!-- Twitter Card -->
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="Daisy — Interactive Experience">
+  <meta name="twitter:description" content="An immersive interactive daisy flower experience with generative music and cinematic animations.">
+  <meta name="twitter:image" content="/img/og-image.png">
+
+  <!-- Preconnect -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="dns-prefetch" href="https://fonts.googleapis.com">
+
+  <!-- Font -->
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400&display=swap" rel="stylesheet">
+
+  <!-- Icons -->
+  <link rel="icon" type="image/png" sizes="192x192" href="/icon-192.png">
+  <link rel="apple-touch-icon" sizes="180x180" href="/icon-192.png">
+
+  <title>Daisy — Interactive Experience</title>
+
+  <style>
+    /* Critical CSS inlined for fast first paint */
+    html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; background: #f5f0e6; }
+    #loader { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; background: #f5f0e6; z-index: 200; transition: opacity 0.6s ease; }
+    #loader.hidden { opacity: 0; pointer-events: none; }
+    .loader-content { text-align: center; animation: breathe 2.5s ease-in-out infinite; }
+    .loader-icon { font-size: 64px; margin-bottom: 1rem; }
+    .loader-text { font-family: 'Inter', sans-serif; font-size: 14px; color: #8a8578; letter-spacing: 0.12em; text-transform: lowercase; }
+    @keyframes breathe { 0%,100%{transform:scale(1);opacity:.7} 50%{transform:scale(1.06);opacity:1} }
+    .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
+  </style>
+
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <!-- Skip link for accessibility -->
+  <a href="#main-content" class="skip-link">Skip to main content</a>
+
+  <!-- Loading state -->
+  <div id="loader" role="status" aria-live="polite" aria-label="Loading experience">
+    <div class="loader-content">
+      <div class="loader-icon" aria-hidden="true">🌼</div>
+      <p class="loader-text">Preparing petals and sound…</p>
+    </div>
+  </div>
+
+  <!-- Accessibility announcer for screen readers -->
+  <div id="announcer" class="sr-only" aria-live="polite" aria-atomic="true"></div>
+
+  <!-- Accessible controls overlay -->
+  <div id="controls" class="controls-overlay" role="region" aria-label="Experience controls">
+    <button id="btn-mute" class="ctrl-btn" aria-label="Toggle mute" title="Toggle mute (M)" hidden>
+      <span aria-hidden="true">🔊</span>
+    </button>
+    <button id="btn-reset" class="ctrl-btn" aria-label="Reset experience" title="Reset (R)" hidden>
+      <span aria-hidden="true">↺</span>
+    </button>
+  </div>
+
+  <main id="main-content">
+    <h1 class="sr-only">Daisy Interactive Experience</h1>
+    <canvas
+      id="main-canvas"
+      role="img"
+      aria-label="Interactive daisy flower with 36 petals that respond to pointer and keyboard. Use Tab and Enter to interact."
+      tabindex="0"
+    ></canvas>
+  </main>
+
+  <!-- Audio prompt -->
+  <div id="audio-prompt" class="audio-prompt" role="dialog" aria-modal="true" aria-labelledby="audio-prompt-title">
+    <button id="audio-prompt-btn" class="prompt-btn" aria-label="Start interactive daisy experience with audio">
+      <span class="prompt-icon" role="img" aria-label="Daisy flower">🌼</span>
+      <span id="audio-prompt-title" class="prompt-title">Tap anywhere to begin</span>
+      <span class="prompt-subtitle">Sound on for the best experience</span>
+    </button>
+  </div>
+
+  <!-- NoScript fallback -->
+  <noscript>
+    <div class="noscript-fallback">
+      <p>🌼 The Daisy Interactive Experience requires JavaScript to run.</p>
+      <p>Please enable JavaScript in your browser to explore the interactive flower, generative music, and ambient animations.</p>
+    </div>
+  </noscript>
+
+  <script type="module" src="/main.ts"></script>
+</body>
+</html>

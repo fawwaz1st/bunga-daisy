@@ -6,6 +6,7 @@ import { VitePWA } from 'vite-plugin-pwa';
 export default defineConfig({
   root: 'src',
   publicDir: '../public',
+  base: '/bunga-daisy/',
   build: {
     outDir: '../dist',
     emptyOutDir: true,
@@ -36,17 +37,17 @@ export default defineConfig({
         background_color: '#f5f0e6',
         display: 'standalone',
         orientation: 'any',
-        scope: '/',
-        start_url: '/',
+        scope: './',
+        start_url: './',
         icons: [
           {
-            src: '/icon-192.png',
+            src: 'icon-192.png',
             sizes: '192x192',
             type: 'image/png',
             purpose: 'any maskable'
           },
           {
-            src: '/icon-512.png',
+            src: 'icon-512.png',
             sizes: '512x512',
             type: 'image/png',
             purpose: 'any maskable'
@@ -58,7 +59,7 @@ export default defineConfig({
             name: 'Start Experience',
             short_name: 'Start',
             description: 'Jump straight into the interactive flower',
-            url: '/'
+            url: './'
           }
         ]
       }

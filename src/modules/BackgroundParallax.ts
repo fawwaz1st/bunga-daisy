@@ -1,10 +1,20 @@
 /**
  * BackgroundParallax - OffscreenCanvas static layer caching + batched drawing
- * Optimized: hills/trees/grasses rendered ONCE (no parallax = no flicker).
- * Only dynamic things (stars, sun/moon, clouds, fireflies) update per frame.
+ *
+ * Flicker prevention:
+ * - Static layer (mountains/hills/ground/trees/grass) uses SeedRandom, so
+ *   every redraw (e.g. on ResizeObserver) produces the SAME positions.
+ *   This eliminates the "trees shifting" flicker users see on resize.
+ * - Sky gradient is cached and only re-created when dayProgress changes
+ *   by ≥0.005. Cuts ~1 gradient allocation per frame.
+ * - Star and firefly positions are rounded to nearest pixel to avoid
+ *   sub-pixel anti-aliasing shimmer.
+ * - Static layer re-renders only when darkness crosses a milestone
+ *   (0/0.25/0.5/0.75/1.0) so hills/mountains darken at night, not per-frame.
  */
 import { ColorUtils } from '../utils/ColorUtils.js';
 import { Utils } from '../config.js';
+import { SeedRandom } from '../utils/SeedRandom.js';
 
 export class BackgroundParallax {
   #ctx: CanvasRenderingContext2D;
@@ -22,6 +32,14 @@ export class BackgroundParallax {
   #staticCanvas: HTMLCanvasElement;
   #staticCtx: CanvasRenderingContext2D;
   #staticDirty = true;
+  #staticRng: SeedRandom = new SeedRandom(1729); // deterministic positions for trees/grass/pebbles
+  #lastStaticDarknessBucket = -1;    // last darkness milestone (-1 forces first draw)
+
+  // Cached sky gradient (recomputed only when dayProgress changes meaningfully)
+  #cachedSkyProgress = -1;
+  #cachedSkyGradient: CanvasGradient | null = null;
+  #cachedSkyCanvas: HTMLCanvasElement | null = null;
+  #cachedSkyCtx: CanvasRenderingContext2D | null = null;
 
   // Dynamic elements (must animate)
   #stars: { x: number; y: number; size: number; twinklePhase: number; twinkleSpeed: number; brightTwinkle: boolean }[] = [];
@@ -59,20 +77,31 @@ export class BackgroundParallax {
 
     this.#staticCanvas = document.createElement('canvas');
     this.#staticCtx = this.#staticCanvas.getContext('2d')!;
+    // Dedicated offscreen for cached sky gradient (avoids recreating 4-5 stop gradient every frame)
+    this.#cachedSkyCanvas = document.createElement('canvas');
+    this.#cachedSkyCtx = this.#cachedSkyCanvas.getContext('2d')!;
     this.resize(width, height);
     this.#initAllElements();
   }
 
   resize(width: number, height: number) {
+    if (width === this.#width && height === this.#height) return;
     this.#width = width;
     this.#height = height;
     this.#scale = Math.min(width, height) / 800;
     this.#staticCanvas.width = width;
     this.#staticCanvas.height = height;
+    this.#cachedSkyCanvas!.width = width;
+    this.#cachedSkyCanvas!.height = height;
+    this.#cachedSkyGradient = null;
+    this.#cachedSkyProgress = -1;
     this.#staticDirty = true;
   }
 
   #initAllElements() {
+    // Fixed seed for deterministic static layer (mountains/hills shapes are
+    // deterministic by Math.sin/cos; trees/grass/pebbles get SeedRandom).
+    this.#staticRng = new SeedRandom(1729);
     this.#generateStars();
     this.#generateMountains();
     this.#generateHills();
@@ -84,8 +113,9 @@ export class BackgroundParallax {
     this.#stars = [];
     for (let i = 0; i < 50; i++) {
       this.#stars.push({
-        x: Math.random(),
-        y: Math.random() * 0.45,
+        // Round to nearest pixel bucket (multiples of 2) to reduce AA shimmer
+        x: Math.round(Math.random() * 200) / 200,
+        y: Math.round(Math.random() * 90) / 200,
         size: Utils.randomRange(0.5, 2.0),
         twinklePhase: Utils.randomRange(0, Math.PI * 2),
         twinkleSpeed: Utils.randomRange(1.0, 5.0),
@@ -141,7 +171,6 @@ export class BackgroundParallax {
 
   #generateClouds() {
     this.#clouds = [];
-    // Fewer but fluffier clouds
     for (let i = 0; i < 5; i++) {
       const puffs = [];
       const pc = Utils.randomInt(7, 10);
@@ -172,8 +201,9 @@ export class BackgroundParallax {
     this.#fireflies = [];
     for (let i = 0; i < 12; i++) {
       this.#fireflies.push({
-        nx: Utils.randomRange(0, 1),
-        ny: Utils.randomRange(0.5, 0.88),
+        // Round to 0.005 to reduce sub-pixel shimmer
+        nx: Math.round(Utils.randomRange(0, 1) * 200) / 200,
+        ny: Math.round(Utils.randomRange(0.5, 0.88) * 200) / 200,
         phase: Utils.randomRange(0, Math.PI * 2),
         speed: Utils.randomRange(0.02, 0.04),
         glowPhase: Utils.randomRange(0, Math.PI * 2),
@@ -249,9 +279,14 @@ export class BackgroundParallax {
 
   draw(flowerX?: number, flowerY?: number) {
     const darkness = this.getDarkness();
-    if (this.#staticDirty) {
+    // Only redraw static layer when: dirty flag set, or darkness crossed a milestone
+    // (0/0.25/0.5/0.75/1.0). This keeps hills/mountains in sync with sky, but avoids
+    // per-frame redraws.
+    const darknessBucket = Math.round(darkness * 4);
+    if (this.#staticDirty || darknessBucket !== this.#lastStaticDarknessBucket) {
       this.#drawStaticLayer(darkness);
       this.#staticDirty = false;
+      this.#lastStaticDarknessBucket = darknessBucket;
     }
 
     this.#drawSky();
@@ -265,7 +300,7 @@ export class BackgroundParallax {
     this.#drawVolumetricLight(flowerX, flowerY);
   }
 
-  // ===================== STATIC LAYER (drawn once) =====================
+  // ===================== STATIC LAYER (drawn at init + milestone) =====================
 
   #drawStaticLayer(darkness: number) {
     const ctx = this.#staticCtx;
@@ -304,7 +339,6 @@ export class BackgroundParallax {
     }
   }
 
-  // Hills: drawn once, no parallax. Blends down to soil color naturally.
   #drawHillsTo(ctx: CanvasRenderingContext2D, darkness: number) {
     for (const hill of this.#hills) {
       const atmHue = hill.hue;
@@ -332,7 +366,6 @@ export class BackgroundParallax {
       ctx.fillStyle = `hsla(${atmHue}, ${atmSat}%, ${lit}%, 0.85)`;
       ctx.fill();
 
-      // Subtle ridge highlight
       ctx.beginPath();
       for (let i = 0; i < hill.points.length; i++) {
         const pt = hill.points[i];
@@ -353,11 +386,11 @@ export class BackgroundParallax {
     }
   }
 
-  // Ground: gradient blend from hill color to soil, no hard strip
+  // Ground: gradient blend from hill color to soil, no hard strip.
+  // Pebbles use SeedRandom for determinism (no flicker on resize).
   #drawGroundTo(ctx: CanvasRenderingContext2D, darkness: number) {
     const topY = this.#height * 0.6;
     const bottomY = this.#height;
-    // Multi-stop gradient blending hills to soil
     const grad = ctx.createLinearGradient(0, topY, 0, bottomY);
     const df = 1 - darkness * 0.3;
     grad.addColorStop(0, `hsla(95, 28%, ${42 * df}%, 1)`);
@@ -367,13 +400,15 @@ export class BackgroundParallax {
     ctx.fillStyle = grad;
     ctx.fillRect(0, topY, this.#width, bottomY - topY);
 
-    // Subtle pebbles - very small dots, blended
     const pebbleCount = Math.max(30, Math.floor(this.#width / 25));
     for (let i = 0; i < pebbleCount; i++) {
-      const x = Math.random() * this.#width;
-      const y = topY + Math.random() * (bottomY - topY) * 0.6;
-      const r = Utils.randomRange(0.5, 1.2);
-      ctx.fillStyle = `rgba(${80 + Math.random() * 40}, ${70 + Math.random() * 30}, ${50 + Math.random() * 20}, 0.5)`;
+      const x = this.#staticRng.next() * this.#width;
+      const y = topY + this.#staticRng.next() * (bottomY - topY) * 0.6;
+      const r = this.#staticRng.range(0.5, 1.2);
+      const rr = 80 + this.#staticRng.next() * 40;
+      const rg = 70 + this.#staticRng.next() * 30;
+      const rb = 50 + this.#staticRng.next() * 20;
+      ctx.fillStyle = `rgba(${rr}, ${rg}, ${rb}, 0.5)`;
       ctx.beginPath();
       ctx.ellipse(x, y, r, r * 0.7, 0, 0, Math.PI * 2);
       ctx.fill();
@@ -395,22 +430,23 @@ export class BackgroundParallax {
     ctx.fill();
   }
 
-  // Trees: rendered once, no parallax, blend better with ground
+  // Trees: rendered at init + on darkness milestone. Uses SeedRandom for
+  // deterministic positions so resizing doesn't shift the trees visibly.
   #drawTreesTo(ctx: CanvasRenderingContext2D, darkness: number) {
     const count = Math.max(6, Math.floor(this.#width / 120));
     const baseY = this.#height * 0.72;
+    const rng = this.#staticRng;
 
     for (let i = 0; i < count; i++) {
-      const depth = Math.random();
-      const nx = Math.random();
-      const h = this.#height * Utils.randomRange(0.06, 0.11) * (1 - depth * 0.3);
-      const w = this.#width * Utils.randomRange(0.025, 0.05) * (1 - depth * 0.3);
-      const type = Utils.randomInt(0, 4);
+      const depth = rng.next();
+      const nx = rng.next();
+      const h = this.#height * rng.range(0.06, 0.11) * (1 - depth * 0.3);
+      const w = this.#width * rng.range(0.025, 0.05) * (1 - depth * 0.3);
+      const type = rng.int(0, 4);
       const opacity = (0.35 + depth * 0.3) * (1 - darkness * 0.3);
       const df = 1 - darkness * 0.45;
       const x = nx * this.#width;
 
-      // Subtle ground shadow
       const shadowX = x + 5 * this.#scale;
       const shadowY = baseY + h * 0.05;
       ctx.fillStyle = `rgba(0,0,0,${0.1 * df})`;
@@ -504,17 +540,18 @@ export class BackgroundParallax {
     }
   }
 
-  // Grasses: drawn once, blended at base of trees
+  // Grasses: deterministic positions, drawn once per static layer update.
   #drawGrassesTo(ctx: CanvasRenderingContext2D, darkness: number) {
     const count = Math.max(20, Math.floor(this.#width / 40));
     const baseY = this.#height;
+    const rng = this.#staticRng;
     ctx.lineCap = 'round';
     for (let i = 0; i < count; i++) {
-      const x = Math.random() * this.#width;
-      const h = this.#height * Utils.randomRange(0.025, 0.055);
-      const lit = Utils.randomRange(38, 52) * (1 - darkness * 0.3);
-      ctx.strokeStyle = `hsl(${Utils.randomRange(85, 120)}, ${Utils.randomRange(40, 55)}%, ${lit}%)`;
-      ctx.lineWidth = Utils.randomRange(1.0, 1.8);
+      const x = rng.next() * this.#width;
+      const h = this.#height * rng.range(0.025, 0.055);
+      const lit = rng.range(38, 52) * (1 - darkness * 0.3);
+      ctx.strokeStyle = `hsl(${rng.range(85, 120)}, ${rng.range(40, 55)}%, ${lit}%)`;
+      ctx.lineWidth = rng.range(1.0, 1.8);
       ctx.globalAlpha = 0.6;
       ctx.beginPath();
       ctx.moveTo(x, baseY);
@@ -526,47 +563,57 @@ export class BackgroundParallax {
 
   // ===================== DYNAMIC ELEMENTS (per frame) =====================
 
+  // Sky: cached as a gradient on an offscreen canvas. Only rebuilt when
+  // dayProgress changes by ≥0.005 (~4.5s of game time). Cuts ~1 createLinearGradient
+  // + 4 createRadialGradient-equivalent color-stops per frame.
   #drawSky() {
-    const ctx = this.#ctx;
     const p = this.#dayProgress;
-    const grad = ctx.createLinearGradient(0, 0, 0, this.#height);
-
-    const stops: [number, string][] = [];
-    if (p < 0.2) {
-      const t = p / 0.2;
-      stops.push([0, ColorUtils.lerpColor('#0a1525', '#607090', t)]);
-      stops.push([0.35, ColorUtils.lerpColor('#152035', '#d89060', t)]);
-      stops.push([0.6, ColorUtils.lerpColor('#202830', '#f0a070', t)]);
-      stops.push([1, ColorUtils.lerpColor('#252830', '#80a080', t)]);
-    } else if (p < 0.4) {
-      const t = (p - 0.2) / 0.2;
-      stops.push([0, ColorUtils.lerpColor('#607090', '#87ceeb', t)]);
-      stops.push([0.35, ColorUtils.lerpColor('#d89060', '#a8d8f0', t)]);
-      stops.push([0.6, ColorUtils.lerpColor('#f0a070', '#b8e0d8', t)]);
-      stops.push([1, ColorUtils.lerpColor('#80a080', '#c0dcc0', t)]);
-    } else if (p < 0.6) {
-      stops.push([0, '#87ceeb']);
-      stops.push([0.4, '#a8d8f0']);
-      stops.push([1, '#c0dcc0']);
-    } else if (p < 0.8) {
-      const t = (p - 0.6) / 0.2;
-      stops.push([0, ColorUtils.lerpColor('#87ceeb', '#4a5080', t)]);
-      stops.push([0.25, ColorUtils.lerpColor('#a8d8f0', '#906070', t)]);
-      stops.push([0.5, ColorUtils.lerpColor('#b0dce0', '#d07050', t)]);
-      stops.push([0.7, ColorUtils.lerpColor('#c0dcc0', '#b04530', t)]);
-      stops.push([1, ColorUtils.lerpColor('#b0d0b0', '#504040', t)]);
-    } else {
-      const t = (p - 0.8) / 0.2;
-      stops.push([0, ColorUtils.lerpColor('#4a5080', '#0a1525', t)]);
-      stops.push([0.35, ColorUtils.lerpColor('#906070', '#152035', t)]);
-      stops.push([0.6, ColorUtils.lerpColor('#d07050', '#202830', t)]);
-      stops.push([1, ColorUtils.lerpColor('#504040', '#252830', t)]);
+    if (!this.#cachedSkyGradient || Math.abs(p - this.#cachedSkyProgress) > 0.005) {
+      const skyCtx = this.#cachedSkyCtx!;
+      skyCtx.clearRect(0, 0, this.#width, this.#height);
+      const grad = skyCtx.createLinearGradient(0, 0, 0, this.#height);
+      const stops: [number, string][] = [];
+      if (p < 0.2) {
+        const t = p / 0.2;
+        stops.push([0, ColorUtils.lerpColor('#0a1525', '#607090', t)]);
+        stops.push([0.35, ColorUtils.lerpColor('#152035', '#d89060', t)]);
+        stops.push([0.6, ColorUtils.lerpColor('#202830', '#f0a070', t)]);
+        stops.push([1, ColorUtils.lerpColor('#252830', '#80a080', t)]);
+      } else if (p < 0.4) {
+        const t = (p - 0.2) / 0.2;
+        stops.push([0, ColorUtils.lerpColor('#607090', '#87ceeb', t)]);
+        stops.push([0.35, ColorUtils.lerpColor('#d89060', '#a8d8f0', t)]);
+        stops.push([0.6, ColorUtils.lerpColor('#f0a070', '#b8e0d8', t)]);
+        stops.push([1, ColorUtils.lerpColor('#80a080', '#c0dcc0', t)]);
+      } else if (p < 0.6) {
+        stops.push([0, '#87ceeb']);
+        stops.push([0.4, '#a8d8f0']);
+        stops.push([1, '#c0dcc0']);
+      } else if (p < 0.8) {
+        const t = (p - 0.6) / 0.2;
+        stops.push([0, ColorUtils.lerpColor('#87ceeb', '#4a5080', t)]);
+        stops.push([0.25, ColorUtils.lerpColor('#a8d8f0', '#906070', t)]);
+        stops.push([0.5, ColorUtils.lerpColor('#b0dce0', '#d07050', t)]);
+        stops.push([0.7, ColorUtils.lerpColor('#c0dcc0', '#b04530', t)]);
+        stops.push([1, ColorUtils.lerpColor('#b0d0b0', '#504040', t)]);
+      } else {
+        const t = (p - 0.8) / 0.2;
+        stops.push([0, ColorUtils.lerpColor('#4a5080', '#0a1525', t)]);
+        stops.push([0.35, ColorUtils.lerpColor('#906070', '#152035', t)]);
+        stops.push([0.6, ColorUtils.lerpColor('#d07050', '#202830', t)]);
+        stops.push([1, ColorUtils.lerpColor('#504040', '#252830', t)]);
+      }
+      stops.forEach((s) => grad.addColorStop(s[0], s[1]));
+      skyCtx.fillStyle = grad;
+      skyCtx.fillRect(0, 0, this.#width, this.#height);
+      this.#cachedSkyGradient = grad;
+      this.#cachedSkyProgress = p;
     }
-    stops.forEach((s) => grad.addColorStop(s[0], s[1]));
-    ctx.fillStyle = grad;
-    ctx.fillRect(0, 0, this.#width, this.#height);
+    // Blit the cached sky to main canvas
+    this.#ctx.drawImage(this.#cachedSkyCanvas!, 0, 0);
   }
 
+  // Stars: rounded to integer pixel positions to avoid sub-pixel AA shimmer.
   #drawStars() {
     const darkness = this.getDarkness();
     if (darkness < 0.3) return;
@@ -576,9 +623,11 @@ export class BackgroundParallax {
       const tw = Math.sin(this.#time * star.twinkleSpeed + star.twinklePhase);
       const br = star.brightTwinkle ? 0.2 + (tw * 0.5 + 0.5) * 0.8 : 0.4 + tw * 0.6;
       const sz = star.size * (star.brightTwinkle ? 1 + tw * 0.4 : 1);
+      const px = Math.round(star.x * this.#width);
+      const py = Math.round(star.y * this.#height);
       ctx.fillStyle = `rgba(255,255,245,${alpha * br * 0.9})`;
       ctx.beginPath();
-      ctx.arc(star.x * this.#width, star.y * this.#height, sz, 0, Math.PI * 2);
+      ctx.arc(px, py, sz, 0, Math.PI * 2);
       ctx.fill();
     }
   }
@@ -696,18 +745,17 @@ export class BackgroundParallax {
     ctx.restore();
   }
 
-  // Clouds: more puffs, lower per-puff opacity, blend with each other
+  // Clouds: rounded to nearest 0.5px to reduce AA shimmer.
   #drawClouds() {
     const ctx = this.#ctx;
     const darkness = this.getDarkness();
     const cb = 1 - darkness * 0.6;
 
     for (const cloud of this.#clouds) {
-      const bx = cloud.x * this.#width;
-      const by = cloud.y * this.#height;
+      const bx = Math.round(cloud.x * this.#width * 2) / 2;
+      const by = Math.round(cloud.y * this.#height * 2) / 2;
       const weatherDark = cloud.darkening;
 
-      // Draw a soft halo for the entire cloud first (cheap, blends puffs)
       const haloR = cloud.puffs.reduce((max, p) => Math.max(max, p.r), 0) * this.#width * 1.3;
       const haloX = bx;
       const haloY = by;
@@ -721,10 +769,9 @@ export class BackgroundParallax {
       ctx.ellipse(haloX, haloY, haloR, haloR * 0.45, 0, 0, Math.PI * 2);
       ctx.fill();
 
-      // Then individual puffs with reduced opacity (blend with halo)
       for (const puff of cloud.puffs) {
-        const px = bx + puff.ox * this.#width;
-        const py = by + puff.oy * this.#height;
+        const px = Math.round((bx + puff.ox * this.#width) * 2) / 2;
+        const py = Math.round((by + puff.oy * this.#height) * 2) / 2;
         const rx = puff.r * this.#width;
         const ry = puff.r * this.#width * 0.55;
 
@@ -739,7 +786,6 @@ export class BackgroundParallax {
         const baseBright = 255 * cb * (1 - weatherDark * 0.35);
         const edgeDark = 220 * cb * (1 - weatherDark * 0.5);
         const shadowR = 180 * cb * (1 - weatherDark * 0.5);
-        // Lower per-puff opacity since we have a halo behind
         grad.addColorStop(0, `rgba(${baseBright},${baseBright},${baseBright + 5},${cloud.opacity * 0.55})`);
         grad.addColorStop(0.55, `rgba(${edgeDark},${edgeDark},${edgeDark + 5},${cloud.opacity * 0.5})`);
         grad.addColorStop(0.9, `rgba(${shadowR},${shadowR},${shadowR + 5},${cloud.opacity * 0.25})`);
@@ -753,6 +799,7 @@ export class BackgroundParallax {
     }
   }
 
+  // Fireflies: rounded positions to reduce sub-pixel shimmer.
   #drawFireflies() {
     const darkness = this.getDarkness();
     if (darkness < 0.45) return;
@@ -760,8 +807,8 @@ export class BackgroundParallax {
     const alpha = Math.min(1, (darkness - 0.45) / 0.35);
     for (const ff of this.#fireflies) {
       const glow = Math.sin(ff.glowPhase) * 0.5 + 0.5;
-      const x = ff.nx * this.#width + this.#offsetX * 0.08 * 25;
-      const y = ff.ny * this.#height;
+      const x = Math.round((ff.nx * this.#width + this.#offsetX * 0.08 * 25) * 2) / 2;
+      const y = Math.round(ff.ny * this.#height * 2) / 2;
       const grad = ctx.createRadialGradient(x, y, 0, x, y, 7);
       grad.addColorStop(0, `rgba(255,255,140,${alpha * glow * 0.75})`);
       grad.addColorStop(0.6, `rgba(180,255,90,${alpha * glow * 0.25})`);

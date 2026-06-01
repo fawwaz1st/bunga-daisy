@@ -56,6 +56,8 @@ class DaisyExperience {
   #isNight = false;
   #lastWeather: string = 'clear';
   #postFrameSkip = 0;
+  #lastCanvasWidth = 0;
+  #lastCanvasHeight = 0;
 
   constructor() {
     const canvas = document.getElementById('main-canvas') as HTMLCanvasElement;
@@ -121,7 +123,20 @@ class DaisyExperience {
     }, 120000);
 
     const loader = document.getElementById('loader');
-    if (loader) requestAnimationFrame(() => loader.classList.add('hidden'));
+    // Wait for TWO animation frames before fading the loader. The first frame
+    // paints static layer + dynamic elements; the second frame proves the
+    // rAF loop is stable. Without this wait, the loader fades over a canvas
+    // that hasn't been confirmed to render — a flash of background color.
+    if (loader) {
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          loader.classList.add('hidden');
+          this.#canvas.classList.add('ready');
+        });
+      });
+    } else {
+      this.#canvas.classList.add('ready');
+    }
     this.#drawFrame(0);
   }
 
@@ -334,12 +349,24 @@ class DaisyExperience {
   }
 
   #resize() {
-    let dpr = this.#capabilities.pixelRatio;
-    if (this.#capabilities.isMobile) dpr = Math.min(dpr, 1.5);
-    this.#width = window.innerWidth;
-    this.#height = window.innerHeight;
-    this.#canvas.width = this.#width * dpr;
-    this.#canvas.height = this.#height * dpr;
+    const dprRaw = this.#capabilities.pixelRatio;
+    const dpr = this.#capabilities.isMobile ? Math.min(dprRaw, 1.5) : dprRaw;
+    const w = window.innerWidth;
+    const h = window.innerHeight;
+    const targetCanvasW = w * dpr;
+    const targetCanvasH = h * dpr;
+    // Skip if dimensions haven't actually changed. Setting canvas.width always
+    // clears the canvas, so calling this on every ResizeObserver tick (which
+    // can fire several times during init) would wipe a freshly-painted frame.
+    if (targetCanvasW === this.#lastCanvasWidth && targetCanvasH === this.#lastCanvasHeight && this.#width === w && this.#height === h) {
+      return;
+    }
+    this.#width = w;
+    this.#height = h;
+    this.#lastCanvasWidth = targetCanvasW;
+    this.#lastCanvasHeight = targetCanvasH;
+    this.#canvas.width = targetCanvasW;
+    this.#canvas.height = targetCanvasH;
     this.#canvas.style.width = `${this.#width}px`;
     this.#canvas.style.height = `${this.#height}px`;
     this.#ctx.setTransform(dpr, 0, 0, dpr, 0, 0);

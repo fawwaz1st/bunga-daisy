@@ -1,10 +1,20 @@
 /**
  * PostProcessing - Bloom, vignette, film grain overlay
+ *
+ * Flicker prevention: noise texture uses SeedRandom(42) so the grain
+ * pattern is identical on every redraw. Without this, the noise texture
+ * regenerated on every resize used fresh Math.random() values, causing
+ * the grain to visibly "shimmer" each time ResizeObserver fired.
  */
+import { SeedRandom } from '../utils/SeedRandom.js';
+
 export class PostProcessing {
   #offscreen: HTMLCanvasElement;
   #offCtx: CanvasRenderingContext2D;
   #noiseCanvas: HTMLCanvasElement | null = null;
+  #lastNoiseW = 0;
+  #lastNoiseH = 0;
+  #noiseRng: SeedRandom = new SeedRandom(42);
 
   constructor(width: number, height: number) {
     this.#offscreen = document.createElement('canvas');
@@ -16,7 +26,12 @@ export class PostProcessing {
   resize(width: number, height: number) {
     this.#offscreen.width = width;
     this.#offscreen.height = height;
-    this.#initNoise();
+    // Only re-init noise if dimensions actually changed.
+    if (this.#lastNoiseW !== width || this.#lastNoiseH !== height) {
+      this.#initNoise();
+      this.#lastNoiseW = width;
+      this.#lastNoiseH = height;
+    }
   }
 
   #initNoise() {
@@ -27,7 +42,7 @@ export class PostProcessing {
     const ctx = this.#noiseCanvas.getContext('2d')!;
     const img = ctx.createImageData(w, h);
     for (let i = 0; i < img.data.length; i += 4) {
-      const v = (Math.random() - 0.5) * 24;
+      const v = (this.#noiseRng.next() - 0.5) * 24;
       img.data[i] = img.data[i+1] = img.data[i+2] = 128 + v;
       img.data[i+3] = 255;
     }

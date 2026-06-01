@@ -43,6 +43,13 @@ html, body {
   display: block;
   cursor: crosshair;
   outline: none;
+  /* Hidden until the first frame is rendered, then fades in. Prevents the
+     flash of an empty/cleared canvas while the loader is still on top. */
+  opacity: 0;
+  transition: opacity 0.3s ease-out;
+}
+#main-canvas.ready {
+  opacity: 1;
 }
 #main-canvas:focus-visible {
   outline: 2px dashed rgba(180, 160, 100, 0.5);
